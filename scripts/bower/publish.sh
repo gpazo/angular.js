@@ -14,19 +14,8 @@ function init {
   TMP_DIR=$(resolveDir ../../tmp)
   BUILD_DIR=$(resolveDir ../../build)
   NEW_VERSION=$(cat $BUILD_DIR/version.txt)
-  REPOS=(
-    angular
-    angular-animate
-    angular-cookies
-    angular-i18n
-    angular-loader
-    angular-mocks
-    angular-route
-    angular-resource
-    angular-sanitize
-    angular-scenario
-    angular-touch
-  )
+  # get the npm dist-tag from a custom property (distTag) in package.json
+  DIST_TAG=$(readJsonProp "package.json" "distTag")
 }
 
 
@@ -50,12 +39,6 @@ function prepare {
     if [ -f $BUILD_DIR/$repo.js ] # ignore i18l
       then
         echo "-- Updating files in bower-$repo"
-        cd $TMP_DIR/bower-$repo
-        git reset --hard HEAD
-        git checkout master
-        git fetch --all
-        git reset --hard origin/master
-        cd $SCRIPT_DIR
         cp $BUILD_DIR/$repo.* $TMP_DIR/bower-$repo/
     fi
   done
@@ -68,6 +51,21 @@ function prepare {
 
 
   #
+  # Run local precommit script if there is one
+  #
+  for repo in "${REPOS[@]}"
+  do
+    if [ -f $TMP_DIR/bower-$repo/precommit.sh ]
+      then
+        echo "-- Running precommit.sh script for bower-$repo"
+        cd $TMP_DIR/bower-$repo
+        $TMP_DIR/bower-$repo/precommit.sh
+        cd $SCRIPT_DIR
+    fi
+  done
+
+
+  #
   # update bower.json
   # tag each repo
   #
@@ -77,6 +75,8 @@ function prepare {
     cd $TMP_DIR/bower-$repo
     replaceJsonProp "bower.json" "version" ".*" "$NEW_VERSION"
     replaceJsonProp "bower.json" "angular.*" ".*" "$NEW_VERSION"
+    replaceJsonProp "package.json" "version" ".*" "$NEW_VERSION"
+    replaceJsonProp "package.json" "angular.*" ".*" "$NEW_VERSION"
 
     git add -A
 
@@ -94,8 +94,16 @@ function publish {
     cd $TMP_DIR/bower-$repo
     git push origin master
     git push origin v$NEW_VERSION
+
+    # don't publish every build to npm
+    if [ "${NEW_VERSION/+sha}" = "$NEW_VERSION" ] ; then
+      echo "-- Publishing to npm as $DIST_TAG"
+      npm publish --tag=$DIST_TAG
+    fi
+
     cd $SCRIPT_DIR
   done
 }
 
+source $(dirname $0)/repos.inc
 source $(dirname $0)/../utils.inc
